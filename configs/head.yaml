@@ -1,0 +1,37 @@
+run_name: head_proxy_qwen3_8b_b16
+
+models:
+  target: Qwen/Qwen3-8B
+  drafter: z-lab/Qwen3-8B-DFlash-b16
+  dtype: bfloat16
+  device: cuda
+  enable_thinking: false
+
+data:
+  dataset: gsm8k
+  split: train
+  num_prompts: 2000
+  blocks_per_prompt: 4
+  gen_max_new_tokens: 128
+  block_size: 16
+  seed: 42
+
+features:
+  cache_dir: cache/features
+  cache_name: gsm8k_train_2k_b16
+
+training:
+  rank: 8
+  epochs: 10
+  batch_size: 32
+  lr: 1.0e-3
+  weight_decay: 0.0
+  val_frac: 0.2
+  log_every: 50
+
+output:
+  root: runs/head_proxy
+  tb: true
+
+kill_criterion:
+  min_improvement_pct: 2.0

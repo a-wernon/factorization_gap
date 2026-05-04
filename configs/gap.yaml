@@ -1,0 +1,31 @@
+run_name: gap_qwen3_8b_b16
+
+models:
+  target: Qwen/Qwen3-8B
+  drafter: z-lab/Qwen3-8B-DFlash-b16
+  dtype: bfloat16
+  device: cuda
+  enable_thinking: false
+
+data:
+  datasets: [gsm8k, humaneval]
+  num_prompts: 500
+  blocks_per_prompt: 4
+  gen_max_new_tokens: 128
+  seed: 42
+
+gap:
+  block_size: 16
+  mask_ratios: [0.10, 0.25, 0.50, 0.75, 0.90, 1.00]
+  order_samples: 1
+  bootstrap_resamples: 1000
+  fast_sequential: true
+
+output:
+  root: runs/gap
+  tb: true
+  save_per_block_rows: true
+
+kill_criterion:
+  nats_threshold: 0.05
+  mask_ratio_target: 1.00

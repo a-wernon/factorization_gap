@@ -1,0 +1,23 @@
+[project]
+name = "factorization-gap"
+version = "0.1.0"
+description = "R1: Factorization gap in DFlash-style KV-injected diffusion drafters."
+requires-python = ">=3.10,<3.13"
+dependencies = [
+    "torch>=2.4",
+    "transformers==4.57.1",
+    "accelerate",
+    "typing-extensions",
+    "datasets",
+    "huggingface-hub",
+    "tensorboard",
+    "matplotlib",
+    "numpy",
+    "tqdm",
+    "rich",
+    "loguru",
+    "pyyaml",
+]
+
+[tool.setuptools.packages.find]
+include = ["fgap*"]
