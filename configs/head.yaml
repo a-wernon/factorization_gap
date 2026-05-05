@@ -1,4 +1,4 @@
-run_name: head_proxy_qwen3_8b_b16_v2
+run_name: head_proxy_qwen3_8b_b16_v3
 
 models:
   target: Qwen/Qwen3-8B
@@ -24,9 +24,10 @@ training:
   # CP rank sweep (backward-compat: if ranks is absent, falls back to `rank`).
   ranks: [8, 16, 32]
   # FF baselines.
-  include_ff_r1: true
-  include_ff_mlp: true
-  mlp_hidden: 128            # ~1M params; ~2x cp_r8 param count (see notes)
+  include_ff_r1: true        # rank-1 CP (per-position gain only)
+  include_ff_mlp: true       # shared residual MLP (capacity only; no per-pos gain)
+  include_ff_gain_mlp: true  # per-position gain + shared residual MLP  (strong FF: matches CP bias minus mixture)
+  mlp_hidden: 128            # shared for ff_mlp and ff_gain_mlp
   # Optim.
   epochs: 10
   batch_size: 32

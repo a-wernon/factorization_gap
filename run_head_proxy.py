@@ -42,7 +42,13 @@ from fgap.features import (
     load_feature_cache,
     save_feature_cache,
 )
-from fgap.heads import FFMLPHead, FFNativeScorer, FFTrainedHead, SharedTrunkCPHead
+from fgap.heads import (
+    FFGainMLPHead,
+    FFMLPHead,
+    FFNativeScorer,
+    FFTrainedHead,
+    SharedTrunkCPHead,
+)
 from fgap.models import load_models
 from fgap.utils import (
     configure_logger,
@@ -137,6 +143,14 @@ def _build_heads(
 
     if t.get("include_ff_mlp", False):
         heads["ff_mlp"] = FFMLPHead(
+            hidden_size=hidden_size,
+            num_future=num_future,
+            lm_head_weight=lm_head_weight,
+            mlp_hidden=int(t.get("mlp_hidden", 128)),
+        ).to(device)
+
+    if t.get("include_ff_gain_mlp", False):
+        heads["ff_gain_mlp"] = FFGainMLPHead(
             hidden_size=hidden_size,
             num_future=num_future,
             lm_head_weight=lm_head_weight,
@@ -314,6 +328,7 @@ def main() -> None:
     ff_native = final["ff_native"]
     ff_r1 = final.get("ff_trained_r1")
     ff_mlp = final.get("ff_mlp")
+    ff_gain_mlp = final.get("ff_gain_mlp")
 
     improvements_vs_native = {
         name: (ff_native - v) / ff_native * 100.0
@@ -338,6 +353,20 @@ def main() -> None:
         if ff_mlp is not None
         else None
     )
+    improvements_vs_ff_gain_mlp = (
+        {
+            name: (ff_gain_mlp - v) / ff_gain_mlp * 100.0
+            for name, v in final.items()
+            if name not in (
+                "ff_native",
+                "ff_trained_r1",
+                "ff_mlp",
+                "ff_gain_mlp",
+            )
+        }
+        if ff_gain_mlp is not None
+        else None
+    )
 
     cp_final = {k: v for k, v in final.items() if k.startswith("cp_r")}
     best_cp_name = min(cp_final, key=cp_final.get) if cp_final else None
@@ -359,6 +388,7 @@ def main() -> None:
             "vs_ff_native": improvements_vs_native,
             "vs_ff_trained_r1": improvements_vs_ff_r1,
             "vs_ff_mlp": improvements_vs_ff_mlp,
+            "vs_ff_gain_mlp": improvements_vs_ff_gain_mlp,
         },
         "best_cp": (
             {
@@ -373,6 +403,11 @@ def main() -> None:
                 "pct_vs_ff_mlp": (
                     improvements_vs_ff_mlp.get(best_cp_name)
                     if improvements_vs_ff_mlp
+                    else None
+                ),
+                "pct_vs_ff_gain_mlp": (
+                    improvements_vs_ff_gain_mlp.get(best_cp_name)
+                    if improvements_vs_ff_gain_mlp
                     else None
                 ),
             }
@@ -411,10 +446,20 @@ def main() -> None:
             f"          {best_cp_name} vs ff_mlp:         "
             f"{improvements_vs_ff_mlp[best_cp_name]:+.2f}%"
         )
+    if improvements_vs_ff_gain_mlp and best_cp_name in (improvements_vs_ff_gain_mlp or {}):
+        print(
+            f"          {best_cp_name} vs ff_gain_mlp:    "
+            f"{improvements_vs_ff_gain_mlp[best_cp_name]:+.2f}%   <-- honest joint-structure test"
+        )
     if ff_mlp is not None:
         print(
-            f"          ff_mlp  vs ff_native:          "
+            f"          ff_mlp       vs ff_native:     "
             f"{improvements_vs_native['ff_mlp']:+.2f}%  (capacity control)"
+        )
+    if ff_gain_mlp is not None:
+        print(
+            f"          ff_gain_mlp  vs ff_native:     "
+            f"{improvements_vs_native['ff_gain_mlp']:+.2f}%  (gain+MLP control)"
         )
     print(f"Outputs: {run_dir}")
     print("=" * 68)

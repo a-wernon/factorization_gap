@@ -148,3 +148,57 @@ class FFMLPHead(nn.Module):
         log_p = _safe_log_softmax_over_vocab(logits)               # (B, n, V)
         log_p_tgt = log_p.gather(2, targets.unsqueeze(-1)).squeeze(-1)  # (B, n)
         return -log_p_tgt.sum(dim=1)                               # (B,)
+
+
+class FFGainMLPHead(nn.Module):
+    """Strong factorized control combining per-position gain + shared MLP.
+
+    Matches CP's inductive bias MINUS the cross-position mixture. Specifically:
+        - Per-position gain  w_i  ∈ R^H         (like FFTrainedHead)
+        - Shared residual MLP  h + W_down(gelu(W_up(h)))   (like FFMLPHead)
+        - Frozen LM trunk
+
+        h' = h + W_down( gelu( W_up(h) ) )     # shared across positions
+        h'' = h' ⊙ w_i                         # per-position multiplicative gain
+        logits_i = W_LM @ h''_i
+
+    Init: W_down zero-init so delta=0 at step 0, and w_i init near 1 so the
+    gain is identity at step 0. Together: output = lm_head(h) = ff_native at
+    step 0, matching the other heads' "start from identity" convention.
+
+    This is the cleanest "strong FF" baseline: if CP still wins by a
+    meaningful margin against this head, the win is *joint-structure*
+    specific, not "per-position gain" or "extra capacity".
+    """
+
+    def __init__(
+        self,
+        hidden_size: int,
+        num_future: int,
+        lm_head_weight: torch.Tensor,
+        mlp_hidden: int = 128,
+    ) -> None:
+        super().__init__()
+        self.hidden_size = hidden_size
+        self.num_future = num_future
+        self.mlp_hidden = mlp_hidden
+        self.register_buffer("lm_head_weight", lm_head_weight.detach(), persistent=False)
+        self.up = nn.Linear(hidden_size, mlp_hidden)
+        self.down = nn.Linear(mlp_hidden, hidden_size)
+        nn.init.zeros_(self.down.weight)
+        nn.init.zeros_(self.down.bias)
+        # Per-position multiplicative gain, init at 1 + small noise (matches
+        # FFTrainedHead / SharedTrunkCPHead.w_sh init convention).
+        w = torch.ones(num_future, hidden_size)
+        w = w + 0.02 * torch.randn_like(w)
+        self.w = nn.Parameter(w)
+
+    def nll(self, h: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        """Per-block NLL. h: (B, n, H); targets: (B, n). Returns (B,)."""
+        delta = self.down(F.gelu(self.up(h)))                      # (B, n, H)
+        h_mlp = h + delta.to(h.dtype)
+        h2 = h_mlp * self.w.unsqueeze(0)                           # (B, n, H)
+        logits = F.linear(h2.to(self.lm_head_weight.dtype), self.lm_head_weight)
+        log_p = _safe_log_softmax_over_vocab(logits)
+        log_p_tgt = log_p.gather(2, targets.unsqueeze(-1)).squeeze(-1)
+        return -log_p_tgt.sum(dim=1)
