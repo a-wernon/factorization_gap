@@ -1,11 +1,22 @@
-"""R1 Part B entry point: CP-r8 vs FF proxy on frozen drafter features.
+"""R1 Part B (v2) entry point: CP rank sweep + MLP FF control on frozen drafter features.
+
+Extends the original Part B to sweep multiple CP ranks in a single run AND
+include a stronger factorized baseline (2-layer position-wise MLP + frozen
+LM trunk), so the CP-specific contribution can be separated from
+head-capacity effects.
+
+Heads compared (per run):
+    ff_native          — frozen LM head, parameter-free.
+    ff_trained_r1      — rank-1 shared-trunk CP (learnable per-position scale).
+    ff_mlp             — 2-layer position-wise MLP + residual + frozen trunk. (optional)
+    cp_r{r}            — rank-r shared-trunk CP.               (one per entry in ranks)
 
 Usage:
-    # First run:  extracts features (slow), trains, reports.
+    # Full run — builds feature cache if missing, then trains all heads.
     python run_head_proxy.py --config configs/head.yaml
-    # Smoke test: ~100 blocks, 2 epochs.
+    # Smoke test — 100 blocks, 2 epochs.
     python run_head_proxy.py --config configs/head.yaml --smoke
-    # If feature cache already exists, training is fast and doesn't touch GPU models.
+    # Iterate on heads/ranks without re-extracting features:
     python run_head_proxy.py --config configs/head.yaml --no-extract
 
 Outputs under runs/head_proxy/<run_name>_<timestamp>/:
@@ -15,13 +26,13 @@ Outputs under runs/head_proxy/<run_name>_<timestamp>/:
 from __future__ import annotations
 
 import argparse
+import collections
 import json
 from pathlib import Path
 
-import numpy as np
 import torch
 from loguru import logger
-from torch.utils.data import DataLoader, Subset, TensorDataset, random_split
+from torch.utils.data import DataLoader, TensorDataset, random_split
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
@@ -31,7 +42,7 @@ from fgap.features import (
     load_feature_cache,
     save_feature_cache,
 )
-from fgap.heads import FFNativeScorer, FFTrainedHead, SharedTrunkCPHead
+from fgap.heads import FFMLPHead, FFNativeScorer, FFTrainedHead, SharedTrunkCPHead
 from fgap.models import load_models
 from fgap.utils import (
     configure_logger,
@@ -80,9 +91,6 @@ def _build_cache_or_load(cfg: dict, run_dir: Path) -> Path:
         seed=cfg["data"]["seed"],
     )
     save_feature_cache(fc, path)
-    # We deliberately keep the models resident — FF-native scoring needs
-    # target.lm_head. Save a pointer to its weights for the training phase.
-    # (Re-load from scratch in the training phase if running --no-extract.)
     return path
 
 
@@ -92,9 +100,6 @@ def _load_lm_head_weight(cfg: dict) -> torch.Tensor:
 
     dtype = dtype_from_str(cfg["models"]["dtype"])
     logger.info(f"Loading target lm_head weight from {cfg['models']['target']}")
-    # `device_map="meta"` would skip weights; we want the lm_head weights
-    # materialized on GPU once.  Loading the full model then grabbing the head
-    # is the simplest reliable path (memory is fine on H200).
     mdl = AutoModelForCausalLM.from_pretrained(
         cfg["models"]["target"], dtype=dtype, device_map=cfg["models"]["device"]
     )
@@ -104,23 +109,84 @@ def _load_lm_head_weight(cfg: dict) -> torch.Tensor:
     return w
 
 
-def _evaluate(head, scorer, loader, device) -> tuple[float, float, float]:
-    """Return (cp_nll, ff_native_nll, ff_trained_nll) — per-block means."""
-    head["cp"].eval()
-    head["ff_trained"].eval()
-    cp_tot = 0.0
-    ff_native_tot = 0.0
-    ff_trained_tot = 0.0
+def _resolve_ranks(t_cfg: dict) -> list[int]:
+    """Accept either `ranks: [..]` (new) or `rank: 8` (old) in the config."""
+    if "ranks" in t_cfg and t_cfg["ranks"]:
+        return [int(r) for r in t_cfg["ranks"]]
+    if "rank" in t_cfg:
+        return [int(t_cfg["rank"])]
+    raise KeyError("training config must set either `ranks` (list) or `rank` (int)")
+
+
+def _build_heads(
+    cfg: dict,
+    hidden_size: int,
+    num_future: int,
+    lm_head_weight: torch.Tensor,
+    device: torch.device,
+) -> "collections.OrderedDict[str, torch.nn.Module]":
+    t = cfg["training"]
+    heads: collections.OrderedDict[str, torch.nn.Module] = collections.OrderedDict()
+
+    if t.get("include_ff_r1", True):
+        heads["ff_trained_r1"] = FFTrainedHead(
+            hidden_size=hidden_size,
+            num_future=num_future,
+            lm_head_weight=lm_head_weight,
+        ).to(device)
+
+    if t.get("include_ff_mlp", False):
+        heads["ff_mlp"] = FFMLPHead(
+            hidden_size=hidden_size,
+            num_future=num_future,
+            lm_head_weight=lm_head_weight,
+            mlp_hidden=int(t.get("mlp_hidden", 128)),
+        ).to(device)
+
+    for r in _resolve_ranks(t):
+        heads[f"cp_r{r}"] = SharedTrunkCPHead(
+            hidden_size=hidden_size,
+            num_future=num_future,
+            rank=r,
+            lm_head_weight=lm_head_weight,
+        ).to(device)
+
+    return heads
+
+
+def _count_params(heads) -> dict[str, int]:
+    return {name: sum(p.numel() for p in h.parameters()) for name, h in heads.items()}
+
+
+def _make_optimizers(heads, lr: float, weight_decay: float) -> dict:
+    return {
+        name: torch.optim.AdamW(h.parameters(), lr=lr, weight_decay=weight_decay)
+        for name, h in heads.items()
+    }
+
+
+def _evaluate_all(
+    heads: "collections.OrderedDict[str, torch.nn.Module]",
+    scorer: FFNativeScorer,
+    loader: DataLoader,
+    device: torch.device,
+) -> dict[str, float]:
+    """Return per-block mean NLL for ff_native and every entry in `heads`."""
+    totals: dict[str, float] = {"ff_native": 0.0}
+    for name in heads:
+        totals[name] = 0.0
     n = 0
+    for h in heads.values():
+        h.eval()
     with torch.inference_mode():
         for feats, tgts in loader:
             feats = feats.to(device, non_blocking=True)
             tgts = tgts.to(device, non_blocking=True)
-            cp_tot += head["cp"].nll(feats, tgts).sum().item()
-            ff_trained_tot += head["ff_trained"].nll(feats, tgts).sum().item()
-            ff_native_tot += scorer.nll(feats, tgts).sum().item()
+            totals["ff_native"] += scorer.nll(feats, tgts).sum().item()
+            for name, h in heads.items():
+                totals[name] += h.nll(feats, tgts).sum().item()
             n += feats.size(0)
-    return cp_tot / n, ff_native_tot / n, ff_trained_tot / n
+    return {k: v / n for k, v in totals.items()}
 
 
 def main() -> None:
@@ -153,12 +219,10 @@ def main() -> None:
         f"Loaded features: N={fc.features.size(0)} n={fc.block_size} H={fc.hidden_size}"
     )
 
-    # sanity: feature dtype (saved as whatever drafter produced — bf16)
-    feats = fc.features.float()         # head lives on GPU but training data small enough to keep fp32 on cpu
+    feats = fc.features.float()
     tgts = fc.targets.long()
     dataset = TensorDataset(feats, tgts)
 
-    # 80/20 split (deterministic)
     n_total = len(dataset)
     n_val = int(round(cfg["training"]["val_frac"] * n_total))
     n_train = n_total - n_val
@@ -183,120 +247,177 @@ def main() -> None:
     device = torch.device(cfg["models"]["device"])
     lm_head_weight = _load_lm_head_weight(cfg).to(device)
 
-    cp = SharedTrunkCPHead(
-        hidden_size=fc.hidden_size,
-        num_future=fc.block_size,
-        rank=cfg["training"]["rank"],
-        lm_head_weight=lm_head_weight,
-    ).to(device)
-    ff_trained = FFTrainedHead(
+    heads = _build_heads(
+        cfg,
         hidden_size=fc.hidden_size,
         num_future=fc.block_size,
         lm_head_weight=lm_head_weight,
-    ).to(device)
+        device=device,
+    )
     scorer = FFNativeScorer(lm_head_weight=lm_head_weight)
 
-    heads = {"cp": cp, "ff_trained": ff_trained}
-    opt_cp = torch.optim.AdamW(
-        cp.parameters(),
-        lr=cfg["training"]["lr"],
-        weight_decay=cfg["training"]["weight_decay"],
+    optimizers = _make_optimizers(
+        heads,
+        lr=float(cfg["training"]["lr"]),
+        weight_decay=float(cfg["training"]["weight_decay"]),
     )
-    opt_ff = torch.optim.AdamW(
-        ff_trained.parameters(),
-        lr=cfg["training"]["lr"],
-        weight_decay=cfg["training"]["weight_decay"],
-    )
+    param_counts = _count_params(heads)
+    logger.info("Heads + param counts (excl. frozen lm_head):")
+    for name, n_p in param_counts.items():
+        logger.info(f"  {name:<18s} params={n_p:,}")
 
     # ---- pre-training evaluation -----------------------------------------
-    pre_cp, pre_ff_native, pre_ff_trained = _evaluate(heads, scorer, val_loader, device)
+    pre = _evaluate_all(heads, scorer, val_loader, device)
     logger.info(
-        f"[pre] val per-block NLL: cp={pre_cp:.4f}  "
-        f"ff_native={pre_ff_native:.4f}  ff_trained={pre_ff_trained:.4f}"
+        "[pre] val per-block NLL: "
+        + "  ".join(f"{k}={v:.4f}" for k, v in pre.items())
     )
 
     # ---- training --------------------------------------------------------
     gstep = 0
+    log_every = int(cfg["training"]["log_every"])
     for epoch in range(cfg["training"]["epochs"]):
-        cp.train()
-        ff_trained.train()
-        ep_cp = 0.0
-        ep_ff = 0.0
+        for h in heads.values():
+            h.train()
+        running = {name: 0.0 for name in heads}
         n = 0
-        for feats, tgts in tqdm(train_loader, desc=f"ep{epoch}"):
-            feats = feats.to(device, non_blocking=True)
-            tgts = tgts.to(device, non_blocking=True)
-            # CP step
-            loss_cp = cp.nll(feats, tgts).mean()
-            opt_cp.zero_grad(set_to_none=True)
-            loss_cp.backward()
-            opt_cp.step()
-            # FF-trained step
-            loss_ff = ff_trained.nll(feats, tgts).mean()
-            opt_ff.zero_grad(set_to_none=True)
-            loss_ff.backward()
-            opt_ff.step()
-
-            bsz = feats.size(0)
-            ep_cp += float(loss_cp.item()) * bsz
-            ep_ff += float(loss_ff.item()) * bsz
+        for feats_b, tgts_b in tqdm(train_loader, desc=f"ep{epoch}"):
+            feats_b = feats_b.to(device, non_blocking=True)
+            tgts_b = tgts_b.to(device, non_blocking=True)
+            bsz = feats_b.size(0)
+            for name, h in heads.items():
+                loss = h.nll(feats_b, tgts_b).mean()
+                opt = optimizers[name]
+                opt.zero_grad(set_to_none=True)
+                loss.backward()
+                opt.step()
+                running[name] += float(loss.item()) * bsz
             n += bsz
-            if tb is not None and gstep % cfg["training"]["log_every"] == 0:
-                tb.add_scalar("train/cp_nll", float(loss_cp.item()), gstep)
-                tb.add_scalar("train/ff_trained_nll", float(loss_ff.item()), gstep)
+            if tb is not None and gstep % log_every == 0:
+                for name in heads:
+                    tb.add_scalar(f"train/{name}_nll", running[name] / n, gstep)
             gstep += 1
 
-        cp_val, ff_native_val, ff_trained_val = _evaluate(
-            heads, scorer, val_loader, device
-        )
+        val = _evaluate_all(heads, scorer, val_loader, device)
         logger.info(
-            f"[ep{epoch}] train cp={ep_cp/n:.4f} ff_trained={ep_ff/n:.4f} | "
-            f"val cp={cp_val:.4f} ff_native={ff_native_val:.4f} ff_trained={ff_trained_val:.4f}"
+            f"[ep{epoch}] train: "
+            + " ".join(f"{k}={running[k]/n:.3f}" for k in heads)
+            + "  ||  val: "
+            + " ".join(f"{k}={v:.3f}" for k, v in val.items())
         )
         if tb is not None:
-            tb.add_scalar("val/cp_nll", cp_val, epoch)
-            tb.add_scalar("val/ff_native_nll", ff_native_val, epoch)
-            tb.add_scalar("val/ff_trained_nll", ff_trained_val, epoch)
+            for name, v in val.items():
+                tb.add_scalar(f"val/{name}_nll", v, epoch)
 
     # ---- report ----------------------------------------------------------
-    cp_final, ff_native_final, ff_trained_final = _evaluate(
-        heads, scorer, val_loader, device
+    final = _evaluate_all(heads, scorer, val_loader, device)
+    ff_native = final["ff_native"]
+    ff_r1 = final.get("ff_trained_r1")
+    ff_mlp = final.get("ff_mlp")
+
+    improvements_vs_native = {
+        name: (ff_native - v) / ff_native * 100.0
+        for name, v in final.items()
+        if name != "ff_native"
+    }
+    improvements_vs_ff_r1 = (
+        {
+            name: (ff_r1 - v) / ff_r1 * 100.0
+            for name, v in final.items()
+            if name not in ("ff_native", "ff_trained_r1")
+        }
+        if ff_r1 is not None
+        else None
     )
-    pct_vs_native = (ff_native_final - cp_final) / ff_native_final * 100.0
-    pct_vs_trained = (ff_trained_final - cp_final) / ff_trained_final * 100.0
-    min_pct = cfg["kill_criterion"]["min_improvement_pct"]
-    decision = "KILL" if pct_vs_native < min_pct else "GO"
+    improvements_vs_ff_mlp = (
+        {
+            name: (ff_mlp - v) / ff_mlp * 100.0
+            for name, v in final.items()
+            if name not in ("ff_native", "ff_trained_r1", "ff_mlp")
+        }
+        if ff_mlp is not None
+        else None
+    )
+
+    cp_final = {k: v for k, v in final.items() if k.startswith("cp_r")}
+    best_cp_name = min(cp_final, key=cp_final.get) if cp_final else None
+    best_cp_pct_vs_native = (
+        improvements_vs_native[best_cp_name] if best_cp_name else None
+    )
+
+    min_pct = float(cfg["kill_criterion"]["min_improvement_pct"])
+    decision = (
+        "KILL"
+        if (best_cp_pct_vs_native is None or best_cp_pct_vs_native < min_pct)
+        else "GO"
+    )
 
     summary = {
-        "per_block_nll": {
-            "cp_r{}".format(cfg["training"]["rank"]): cp_final,
-            "ff_native": ff_native_final,
-            "ff_trained_r1": ff_trained_final,
-        },
+        "per_block_nll": {k: float(v) for k, v in final.items()},
+        "param_counts": param_counts,
         "improvement_pct": {
-            "cp_vs_ff_native": pct_vs_native,
-            "cp_vs_ff_trained": pct_vs_trained,
+            "vs_ff_native": improvements_vs_native,
+            "vs_ff_trained_r1": improvements_vs_ff_r1,
+            "vs_ff_mlp": improvements_vs_ff_mlp,
         },
+        "best_cp": (
+            {
+                "name": best_cp_name,
+                "nll": float(cp_final[best_cp_name]),
+                "pct_vs_native": best_cp_pct_vs_native,
+                "pct_vs_ff_trained_r1": (
+                    improvements_vs_ff_r1.get(best_cp_name)
+                    if improvements_vs_ff_r1
+                    else None
+                ),
+                "pct_vs_ff_mlp": (
+                    improvements_vs_ff_mlp.get(best_cp_name)
+                    if improvements_vs_ff_mlp
+                    else None
+                ),
+            }
+            if best_cp_name
+            else None
+        ),
         "kill_criterion": {
             "min_improvement_pct": min_pct,
-            "observed_pct_vs_native": pct_vs_native,
+            "observed_best_pct_vs_native": best_cp_pct_vs_native,
             "decision": decision,
         },
         "n_train_blocks": n_train,
         "n_val_blocks": n_val,
-        "rank": cfg["training"]["rank"],
+        "ranks": _resolve_ranks(cfg["training"]),
         "block_size": fc.block_size,
     }
     dump_json(run_dir / "summary.json", summary)
     logger.info(json.dumps(summary, indent=2))
 
-    print("\n" + "=" * 60)
-    print(
-        f"DECISION: {decision}   "
-        f"(CP vs FF_native: {pct_vs_native:.2f}%, threshold {min_pct:.1f}%)"
-    )
+    print("\n" + "=" * 68)
+    if best_cp_name:
+        print(
+            f"DECISION: {decision}   "
+            f"(best CP = {best_cp_name} @ NLL {cp_final[best_cp_name]:.3f};  "
+            f"{best_cp_pct_vs_native:.2f}% vs ff_native, threshold {min_pct:.1f}%)"
+        )
+    else:
+        print(f"DECISION: {decision}  (no CP heads configured)")
+    if improvements_vs_ff_r1 and best_cp_name in (improvements_vs_ff_r1 or {}):
+        print(
+            f"          {best_cp_name} vs ff_trained_r1:  "
+            f"{improvements_vs_ff_r1[best_cp_name]:+.2f}%"
+        )
+    if improvements_vs_ff_mlp and best_cp_name in (improvements_vs_ff_mlp or {}):
+        print(
+            f"          {best_cp_name} vs ff_mlp:         "
+            f"{improvements_vs_ff_mlp[best_cp_name]:+.2f}%"
+        )
+    if ff_mlp is not None:
+        print(
+            f"          ff_mlp  vs ff_native:          "
+            f"{improvements_vs_native['ff_mlp']:+.2f}%  (capacity control)"
+        )
     print(f"Outputs: {run_dir}")
-    print("=" * 60)
+    print("=" * 68)
 
 
 if __name__ == "__main__":

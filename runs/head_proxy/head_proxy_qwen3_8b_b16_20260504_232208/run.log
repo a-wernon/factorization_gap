@@ -1,0 +1,68 @@
+2026-05-04 23:22:08.964 | INFO     | fgap.utils:configure_logger:44 - Logging to runs/head_proxy/head_proxy_qwen3_8b_b16_20260504_232208/run.log
+2026-05-04 23:22:08.965 | INFO     | __main__:_build_cache_or_load:65 - Feature cache not found, building → cache/features/gsm8k_train_2k_b16.pt
+2026-05-04 23:22:08.965 | INFO     | fgap.models:load_models:41 - Loading target: Qwen/Qwen3-8B
+2026-05-04 23:22:14.104 | INFO     | fgap.models:load_models:45 - Loading drafter: z-lab/Qwen3-8B-DFlash-b16
+2026-05-04 23:22:16.664 | INFO     | fgap.models:load_models:61 - block_size=16 mask_token_id=151669 target_layer_ids=[1, 9, 17, 25, 33] hidden_size=4096
+2026-05-04 23:25:04.300 | INFO     | fgap.data:generate_prompt_blocks:113 - [gen] prompt 50/1319  blocks_total=200
+2026-05-04 23:27:46.777 | INFO     | fgap.data:generate_prompt_blocks:113 - [gen] prompt 100/1319  blocks_total=400
+2026-05-04 23:30:49.130 | INFO     | fgap.data:generate_prompt_blocks:113 - [gen] prompt 150/1319  blocks_total=600
+2026-05-04 23:32:37.554 | INFO     | fgap.data:generate_prompt_blocks:113 - [gen] prompt 200/1319  blocks_total=800
+2026-05-04 23:35:36.707 | INFO     | fgap.data:generate_prompt_blocks:113 - [gen] prompt 250/1319  blocks_total=1000
+2026-05-04 23:38:24.097 | INFO     | fgap.data:generate_prompt_blocks:113 - [gen] prompt 300/1319  blocks_total=1200
+2026-05-04 23:41:31.030 | INFO     | fgap.data:generate_prompt_blocks:113 - [gen] prompt 350/1319  blocks_total=1400
+2026-05-04 23:44:35.830 | INFO     | fgap.data:generate_prompt_blocks:113 - [gen] prompt 400/1319  blocks_total=1600
+2026-05-04 23:47:41.836 | INFO     | fgap.data:generate_prompt_blocks:113 - [gen] prompt 450/1319  blocks_total=1800
+2026-05-04 23:50:35.333 | INFO     | fgap.data:generate_prompt_blocks:113 - [gen] prompt 500/1319  blocks_total=2000
+2026-05-04 23:53:11.124 | INFO     | fgap.data:generate_prompt_blocks:113 - [gen] prompt 550/1319  blocks_total=2200
+2026-05-04 23:56:09.449 | INFO     | fgap.data:generate_prompt_blocks:113 - [gen] prompt 600/1319  blocks_total=2400
+2026-05-04 23:59:02.950 | INFO     | fgap.data:generate_prompt_blocks:113 - [gen] prompt 650/1319  blocks_total=2600
+2026-05-05 00:01:36.091 | INFO     | fgap.data:generate_prompt_blocks:113 - [gen] prompt 700/1319  blocks_total=2800
+2026-05-05 00:04:29.930 | INFO     | fgap.data:generate_prompt_blocks:113 - [gen] prompt 750/1319  blocks_total=3000
+2026-05-05 00:07:30.570 | INFO     | fgap.data:generate_prompt_blocks:113 - [gen] prompt 800/1319  blocks_total=3200
+2026-05-05 00:10:19.830 | INFO     | fgap.data:generate_prompt_blocks:113 - [gen] prompt 850/1319  blocks_total=3400
+2026-05-05 00:12:40.485 | INFO     | fgap.data:generate_prompt_blocks:113 - [gen] prompt 900/1319  blocks_total=3600
+2026-05-05 00:15:41.181 | INFO     | fgap.data:generate_prompt_blocks:113 - [gen] prompt 950/1319  blocks_total=3800
+2026-05-05 00:18:14.150 | INFO     | fgap.data:generate_prompt_blocks:113 - [gen] prompt 1000/1319  blocks_total=4000
+2026-05-05 00:20:56.312 | INFO     | fgap.data:generate_prompt_blocks:113 - [gen] prompt 1050/1319  blocks_total=4200
+2026-05-05 00:23:30.736 | INFO     | fgap.data:generate_prompt_blocks:113 - [gen] prompt 1100/1319  blocks_total=4400
+2026-05-05 00:26:03.426 | INFO     | fgap.data:generate_prompt_blocks:113 - [gen] prompt 1150/1319  blocks_total=4600
+2026-05-05 00:28:58.416 | INFO     | fgap.data:generate_prompt_blocks:113 - [gen] prompt 1200/1319  blocks_total=4800
+2026-05-05 00:31:24.205 | INFO     | fgap.data:generate_prompt_blocks:113 - [gen] prompt 1250/1319  blocks_total=5000
+2026-05-05 00:33:35.440 | INFO     | fgap.data:generate_prompt_blocks:113 - [gen] prompt 1300/1319  blocks_total=5200
+2026-05-05 00:34:27.171 | INFO     | fgap.data:generate_prompt_blocks:114 - [gen] done: 5276 blocks from 1319 prompts (['gsm8k'])
+2026-05-05 00:37:34.224 | INFO     | fgap.features:build_feature_cache:104 - Feature cache: features (5276, 16, 4096) torch.bfloat16, targets (5276, 16) torch.int64
+2026-05-05 00:37:34.917 | INFO     | fgap.features:save_feature_cache:132 - Saved feature cache → cache/features/gsm8k_train_2k_b16.pt
+2026-05-05 00:37:35.413 | INFO     | __main__:main:152 - Loaded features: N=5276 n=16 H=4096
+2026-05-05 00:37:35.513 | INFO     | __main__:main:180 - train blocks=4221 val blocks=1055
+2026-05-05 00:37:35.513 | INFO     | __main__:_load_lm_head_weight:94 - Loading target lm_head weight from Qwen/Qwen3-8B
+2026-05-05 00:37:40.540 | INFO     | __main__:main:213 - [pre] val per-block NLL: cp=50.2107  ff_native=50.2161  ff_trained=50.2241
+2026-05-05 00:37:45.165 | INFO     | __main__:main:252 - [ep0] train cp=47.8564 ff_trained=48.3418 | val cp=44.7938 ff_native=50.2161 ff_trained=45.5508
+2026-05-05 00:37:49.934 | INFO     | __main__:main:252 - [ep1] train cp=44.6217 ff_trained=45.4041 | val cp=43.3802 ff_native=50.2161 ff_trained=44.0036
+2026-05-05 00:37:54.359 | INFO     | __main__:main:252 - [ep2] train cp=43.5213 ff_trained=44.2887 | val cp=42.8312 ff_native=50.2161 ff_trained=43.4288
+2026-05-05 00:37:58.801 | INFO     | __main__:main:252 - [ep3] train cp=42.8377 ff_trained=43.6715 | val cp=42.5076 ff_native=50.2161 ff_trained=43.0974
+2026-05-05 00:38:03.189 | INFO     | __main__:main:252 - [ep4] train cp=42.2809 ff_trained=43.1899 | val cp=42.2776 ff_native=50.2161 ff_trained=42.8653
+2026-05-05 00:38:07.637 | INFO     | __main__:main:252 - [ep5] train cp=41.7927 ff_trained=42.7827 | val cp=42.0683 ff_native=50.2161 ff_trained=42.6769
+2026-05-05 00:38:12.093 | INFO     | __main__:main:252 - [ep6] train cp=41.3472 ff_trained=42.4135 | val cp=41.9155 ff_native=50.2161 ff_trained=42.5274
+2026-05-05 00:38:16.584 | INFO     | __main__:main:252 - [ep7] train cp=40.9454 ff_trained=42.0830 | val cp=41.7624 ff_native=50.2161 ff_trained=42.4015
+2026-05-05 00:38:21.009 | INFO     | __main__:main:252 - [ep8] train cp=40.5720 ff_trained=41.7729 | val cp=41.6411 ff_native=50.2161 ff_trained=42.3030
+2026-05-05 00:38:25.411 | INFO     | __main__:main:252 - [ep9] train cp=40.2180 ff_trained=41.4848 | val cp=41.5851 ff_native=50.2161 ff_trained=42.2102
+2026-05-05 00:38:25.949 | INFO     | __main__:main:291 - {
+  "per_block_nll": {
+    "cp_r8": 41.58512107523697,
+    "ff_native": 50.216089561426244,
+    "ff_trained_r1": 42.21019882997631
+  },
+  "improvement_pct": {
+    "cp_vs_ff_native": 17.18765551354122,
+    "cp_vs_ff_trained": 1.480869012859108
+  },
+  "kill_criterion": {
+    "min_improvement_pct": 2.0,
+    "observed_pct_vs_native": 17.18765551354122,
+    "decision": "GO"
+  },
+  "n_train_blocks": 4221,
+  "n_val_blocks": 1055,
+  "rank": 8,
+  "block_size": 16
+}

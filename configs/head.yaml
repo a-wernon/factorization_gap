@@ -1,4 +1,4 @@
-run_name: head_proxy_qwen3_8b_b16
+run_name: head_proxy_qwen3_8b_b16_v2
 
 models:
   target: Qwen/Qwen3-8B
@@ -18,10 +18,16 @@ data:
 
 features:
   cache_dir: cache/features
-  cache_name: gsm8k_train_2k_b16
+  cache_name: gsm8k_train_2k_b16    # reuse the R1 v1 cache; --no-extract is safe
 
 training:
-  rank: 8
+  # CP rank sweep (backward-compat: if ranks is absent, falls back to `rank`).
+  ranks: [8, 16, 32]
+  # FF baselines.
+  include_ff_r1: true
+  include_ff_mlp: true
+  mlp_hidden: 128            # ~1M params; ~2x cp_r8 param count (see notes)
+  # Optim.
   epochs: 10
   batch_size: 32
   lr: 1.0e-3
@@ -33,5 +39,8 @@ output:
   root: runs/head_proxy
   tb: true
 
+# Kill criterion: best CP head's improvement over ff_native (retains original
+# threshold semantics). Additional reporting against ff_trained_r1 and ff_mlp
+# is logged but does not drive the decision.
 kill_criterion:
   min_improvement_pct: 2.0

@@ -1,0 +1,74 @@
+2026-05-04 22:55:52.899 | INFO     | fgap.utils:configure_logger:44 - Logging to runs/gap/gap_qwen3_8b_b16_20260504_225552/run.log
+2026-05-04 22:55:52.902 | INFO     | fgap.models:load_models:41 - Loading target: Qwen/Qwen3-8B
+2026-05-04 22:55:59.322 | INFO     | fgap.models:load_models:45 - Loading drafter: z-lab/Qwen3-8B-DFlash-b16
+2026-05-04 22:56:01.557 | INFO     | fgap.models:load_models:61 - block_size=16 mask_token_id=151669 target_layer_ids=[1, 9, 17, 25, 33] hidden_size=4096
+2026-05-04 22:56:01.557 | INFO     | __main__:main:100 - Generating target responses and slicing into blocks...
+2026-05-04 22:58:16.893 | INFO     | fgap.data:generate_prompt_blocks:113 - [gen] prompt 50/500  blocks_total=200
+2026-05-04 23:00:55.432 | INFO     | fgap.data:generate_prompt_blocks:113 - [gen] prompt 100/500  blocks_total=400
+2026-05-04 23:03:29.277 | INFO     | fgap.data:generate_prompt_blocks:113 - [gen] prompt 150/500  blocks_total=600
+2026-05-04 23:05:51.160 | INFO     | fgap.data:generate_prompt_blocks:113 - [gen] prompt 200/500  blocks_total=800
+2026-05-04 23:08:34.583 | INFO     | fgap.data:generate_prompt_blocks:113 - [gen] prompt 250/500  blocks_total=1000
+2026-05-04 23:10:24.765 | INFO     | fgap.data:generate_prompt_blocks:113 - [gen] prompt 300/500  blocks_total=1200
+2026-05-04 23:12:48.285 | INFO     | fgap.data:generate_prompt_blocks:113 - [gen] prompt 350/500  blocks_total=1400
+2026-05-04 23:14:55.479 | INFO     | fgap.data:generate_prompt_blocks:113 - [gen] prompt 400/500  blocks_total=1600
+2026-05-04 23:17:04.213 | INFO     | fgap.data:generate_prompt_blocks:113 - [gen] prompt 450/500  blocks_total=1800
+2026-05-04 23:19:28.091 | INFO     | fgap.data:generate_prompt_blocks:113 - [gen] prompt 500/500  blocks_total=2000
+2026-05-04 23:19:28.091 | INFO     | fgap.data:generate_prompt_blocks:114 - [gen] done: 2000 blocks from 500 prompts (['gsm8k', 'humaneval'])
+2026-05-04 23:22:03.394 | INFO     | __main__:main:187 - {
+  "per_mask_ratio": {
+    "0.10": {
+      "n": 2000,
+      "gap_mean": -0.0766536202065181,
+      "gap_ci_lo": -0.09924847462327452,
+      "gap_ci_hi": -0.054791968911077134,
+      "sequential_mean": -2.927573817902943,
+      "one_step_mean": -2.850920197696425
+    },
+    "0.25": {
+      "n": 2000,
+      "gap_mean": -0.12384608649869915,
+      "gap_ci_lo": -0.15103731839173706,
+      "gap_ci_hi": -0.09768795871580953,
+      "sequential_mean": -2.7655510809787085,
+      "one_step_mean": -2.6417049944800093
+    },
+    "0.50": {
+      "n": 2000,
+      "gap_mean": -0.1240077128164703,
+      "gap_ci_lo": -0.14902497568545223,
+      "gap_ci_hi": -0.09665525617172827,
+      "sequential_mean": -2.7010817081648857,
+      "one_step_mean": -2.577073995348415
+    },
+    "0.75": {
+      "n": 2000,
+      "gap_mean": 0.007665508560525862,
+      "gap_ci_lo": -0.024629391014599246,
+      "gap_ci_hi": 0.03915990802335242,
+      "sequential_mean": -2.6839699518084528,
+      "one_step_mean": -2.6916354603689783
+    },
+    "0.90": {
+      "n": 2000,
+      "gap_mean": 0.17642173002340963,
+      "gap_ci_lo": 0.13745239795592745,
+      "gap_ci_hi": 0.21424559296457363,
+      "sequential_mean": -2.6854985915848184,
+      "one_step_mean": -2.861920321608228
+    },
+    "1.00": {
+      "n": 2000,
+      "gap_mean": 0.44885747126379283,
+      "gap_ci_lo": 0.40516768814991516,
+      "gap_ci_hi": 0.49442509410720376,
+      "sequential_mean": -2.7306319916695356,
+      "one_step_mean": -3.1794894629333283
+    }
+  },
+  "kill_criterion": {
+    "mask_ratio_target": 1.0,
+    "nats_threshold": 0.05,
+    "observed_gap": 0.44885747126379283,
+    "decision": "GO"
+  }
+}

@@ -104,3 +104,47 @@ class FFTrainedHead(SharedTrunkCPHead):
 
     def __init__(self, hidden_size: int, num_future: int, lm_head_weight: torch.Tensor) -> None:
         super().__init__(hidden_size, num_future, rank=1, lm_head_weight=lm_head_weight)
+
+
+class FFMLPHead(nn.Module):
+    """Stronger factorized baseline: position-wise 2-layer MLP with residual,
+    then the frozen LM trunk. Purely factorized — no cross-position structure
+    — so the CP-vs-FFMLP comparison isolates *joint structure* from *head
+    capacity*.
+
+    Architecture:
+        h2 = h + W_down( gelu( W_up(h) ) )    # same MLP applied per position
+        logits_i = lm_head_weight @ h2_i
+
+    Init: W_down and its bias are zero, so at step 0 the head computes
+    exactly lm_head(h) — matching ff_native. Training then moves from that
+    point. This keeps early-training dynamics comparable to the CP / rank-1
+    heads (whose w_sh is init at 1 so they also start at ff_native).
+    """
+
+    def __init__(
+        self,
+        hidden_size: int,
+        num_future: int,
+        lm_head_weight: torch.Tensor,   # (V, H), frozen
+        mlp_hidden: int = 128,
+    ) -> None:
+        super().__init__()
+        self.hidden_size = hidden_size
+        self.num_future = num_future
+        self.mlp_hidden = mlp_hidden
+        self.register_buffer("lm_head_weight", lm_head_weight.detach(), persistent=False)
+        self.up = nn.Linear(hidden_size, mlp_hidden)
+        self.down = nn.Linear(mlp_hidden, hidden_size)
+        # Start at identity: delta = 0 -> h2 = h.
+        nn.init.zeros_(self.down.weight)
+        nn.init.zeros_(self.down.bias)
+
+    def nll(self, h: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        """Per-block NLL. h: (B, n, H); targets: (B, n). Returns (B,)."""
+        delta = self.down(F.gelu(self.up(h)))                      # (B, n, H)
+        h2 = h + delta.to(h.dtype)
+        logits = F.linear(h2.to(self.lm_head_weight.dtype), self.lm_head_weight)
+        log_p = _safe_log_softmax_over_vocab(logits)               # (B, n, V)
+        log_p_tgt = log_p.gather(2, targets.unsqueeze(-1)).squeeze(-1)  # (B, n)
+        return -log_p_tgt.sum(dim=1)                               # (B,)

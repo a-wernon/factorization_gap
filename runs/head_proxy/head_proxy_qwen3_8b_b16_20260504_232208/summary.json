@@ -1,0 +1,20 @@
+{
+  "per_block_nll": {
+    "cp_r8": 41.58512107523697,
+    "ff_native": 50.216089561426244,
+    "ff_trained_r1": 42.21019882997631
+  },
+  "improvement_pct": {
+    "cp_vs_ff_native": 17.18765551354122,
+    "cp_vs_ff_trained": 1.480869012859108
+  },
+  "kill_criterion": {
+    "min_improvement_pct": 2.0,
+    "observed_pct_vs_native": 17.18765551354122,
+    "decision": "GO"
+  },
+  "n_train_blocks": 4221,
+  "n_val_blocks": 1055,
+  "rank": 8,
+  "block_size": 16
+}
