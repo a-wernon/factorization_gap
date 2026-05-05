@@ -28,6 +28,7 @@ from __future__ import annotations
 import argparse
 import collections
 import json
+import math
 from pathlib import Path
 
 import torch
@@ -87,9 +88,13 @@ def _build_cache_or_load(cfg: dict, run_dir: Path) -> Path:
         dtype=dtype,
         device=cfg["models"]["device"],
     )
+    datasets_cfg = cfg["data"].get("datasets")
+    if datasets_cfg is None:
+        datasets_cfg = [cfg["data"]["dataset"]]
+    datasets_cfg = list(datasets_cfg)
     fc = build_feature_cache(
         m=m,
-        datasets=[cfg["data"]["dataset"]],
+        datasets=datasets_cfg,
         num_prompts=cfg["data"]["num_prompts"],
         blocks_per_prompt=cfg["data"]["blocks_per_prompt"],
         gen_max_new_tokens=cfg["data"]["gen_max_new_tokens"],
@@ -122,6 +127,25 @@ def _resolve_ranks(t_cfg: dict) -> list[int]:
     if "rank" in t_cfg:
         return [int(t_cfg["rank"])]
     raise KeyError("training config must set either `ranks` (list) or `rank` (int)")
+
+
+def _resolve_aux_lambdas(t_cfg: dict) -> list[float]:
+    """Accept `aux_lambdas: [..]` list; default to [0.0] for backward compat."""
+    if "aux_lambdas" in t_cfg and t_cfg["aux_lambdas"] is not None:
+        return [float(x) for x in t_cfg["aux_lambdas"]]
+    if "aux_lambda" in t_cfg:
+        return [float(t_cfg["aux_lambda"])]
+    return [0.0]
+
+
+def _cp_head_name(rank: int, aux_lambda: float, single_lambda: bool) -> str:
+    """Canonical head name. When only one λ is swept, drop the λ suffix for
+    continuity with older run naming."""
+    if single_lambda:
+        return f"cp_r{rank}"
+    # format lambda compactly without trailing zeros: 0.0 -> 0, 0.01 -> 0.01, 0.1 -> 0.1
+    s = f"{aux_lambda:g}".rstrip("0").rstrip(".") or "0"
+    return f"cp_r{rank}_l{s}"
 
 
 def _build_heads(
@@ -157,13 +181,19 @@ def _build_heads(
             mlp_hidden=int(t.get("mlp_hidden", 128)),
         ).to(device)
 
-    for r in _resolve_ranks(t):
-        heads[f"cp_r{r}"] = SharedTrunkCPHead(
-            hidden_size=hidden_size,
-            num_future=num_future,
-            rank=r,
-            lm_head_weight=lm_head_weight,
-        ).to(device)
+    ranks = _resolve_ranks(t)
+    lambdas = _resolve_aux_lambdas(t)
+    single_lambda = len(lambdas) == 1
+    for r in ranks:
+        for lam in lambdas:
+            name = _cp_head_name(r, lam, single_lambda)
+            heads[name] = SharedTrunkCPHead(
+                hidden_size=hidden_size,
+                num_future=num_future,
+                rank=r,
+                lm_head_weight=lm_head_weight,
+                aux_lambda=lam,
+            ).to(device)
 
     return heads
 
@@ -184,23 +214,85 @@ def _evaluate_all(
     scorer: FFNativeScorer,
     loader: DataLoader,
     device: torch.device,
-) -> dict[str, float]:
-    """Return per-block mean NLL for ff_native and every entry in `heads`."""
+) -> tuple[dict[str, float], dict[str, dict]]:
+    """Return (per-block NLL per head, gate-entropy stats per head).
+
+    Gate stats are reported for every head; for non-mixture heads (FF
+    controls and rank-1) the entries are zero so downstream code can
+    iterate uniformly.
+
+    Gate stats are averaged across batches weighted by batch size. For
+    mean_pi we average with equal weight on the batch-averaged pi at
+    each step — this gives the overall mixture usage on the val set.
+    """
     totals: dict[str, float] = {"ff_native": 0.0}
     for name in heads:
         totals[name] = 0.0
+
+    # Gate diagnostics — accumulate mean_pi weighted by batch size.
+    gate_accum: dict[str, dict] = {}
+    for name, head in heads.items():
+        r = getattr(head, "rank", 0)
+        if r and r > 1:
+            gate_accum[name] = {
+                "H_per_sum": 0.0,
+                "mean_pi_sum": torch.zeros(r, device=device, dtype=torch.float32),
+                "batches": 0,
+                "H_max": math.log(r),
+            }
+
     n = 0
     for h in heads.values():
         h.eval()
     with torch.inference_mode():
-        for feats, tgts in loader:
-            feats = feats.to(device, non_blocking=True)
-            tgts = tgts.to(device, non_blocking=True)
-            totals["ff_native"] += scorer.nll(feats, tgts).sum().item()
+        for feats_b, tgts_b in loader:
+            feats_b = feats_b.to(device, non_blocking=True)
+            tgts_b = tgts_b.to(device, non_blocking=True)
+            bsz = feats_b.size(0)
+            totals["ff_native"] += scorer.nll(feats_b, tgts_b).sum().item()
             for name, h in heads.items():
-                totals[name] += h.nll(feats, tgts).sum().item()
-            n += feats.size(0)
-    return {k: v / n for k, v in totals.items()}
+                totals[name] += h.nll(feats_b, tgts_b).sum().item()
+                if name in gate_accum:
+                    stats = h.gate_stats(feats_b)
+                    gate_accum[name]["H_per_sum"] += stats["H_per_mean"] * bsz
+                    gate_accum[name]["mean_pi_sum"] += (
+                        torch.tensor(stats["mean_pi"], device=device) * bsz
+                    )
+                    gate_accum[name]["batches"] += bsz
+            n += bsz
+
+    per_block_nll = {k: v / n for k, v in totals.items()}
+
+    entropy: dict[str, dict] = {}
+    for name, head in heads.items():
+        if name in gate_accum:
+            a = gate_accum[name]
+            H_per = a["H_per_sum"] / max(a["batches"], 1)
+            mean_pi = (a["mean_pi_sum"] / max(a["batches"], 1)).cpu().tolist()
+            H_batch = float(
+                -sum(
+                    p * math.log(max(p, 1e-40)) for p in mean_pi
+                )
+            )
+            H_max = a["H_max"]
+            entropy[name] = {
+                "H_per_mean": H_per,
+                "H_per_mean_norm": H_per / H_max if H_max > 0 else 0.0,
+                "H_batch": H_batch,
+                "H_batch_norm": H_batch / H_max if H_max > 0 else 0.0,
+                "H_max": H_max,
+                "mean_pi": mean_pi,
+            }
+        else:
+            entropy[name] = {
+                "H_per_mean": 0.0,
+                "H_per_mean_norm": 0.0,
+                "H_batch": 0.0,
+                "H_batch_norm": 0.0,
+                "H_max": 0.0,
+                "mean_pi": [],
+            }
+    return per_block_nll, entropy
 
 
 def main() -> None:
@@ -281,7 +373,7 @@ def main() -> None:
         logger.info(f"  {name:<18s} params={n_p:,}")
 
     # ---- pre-training evaluation -----------------------------------------
-    pre = _evaluate_all(heads, scorer, val_loader, device)
+    pre, pre_ent = _evaluate_all(heads, scorer, val_loader, device)
     logger.info(
         "[pre] val per-block NLL: "
         + "  ".join(f"{k}={v:.4f}" for k, v in pre.items())
@@ -293,38 +385,63 @@ def main() -> None:
     for epoch in range(cfg["training"]["epochs"]):
         for h in heads.values():
             h.train()
-        running = {name: 0.0 for name in heads}
+        running_nll = {name: 0.0 for name in heads}
+        running_aux = {name: 0.0 for name in heads}
         n = 0
         for feats_b, tgts_b in tqdm(train_loader, desc=f"ep{epoch}"):
             feats_b = feats_b.to(device, non_blocking=True)
             tgts_b = tgts_b.to(device, non_blocking=True)
             bsz = feats_b.size(0)
             for name, h in heads.items():
-                loss = h.nll(feats_b, tgts_b).mean()
+                loss_nll = h.nll(feats_b, tgts_b).mean()
+                lam = float(getattr(h, "aux_lambda", 0.0))
+                if lam > 0.0:
+                    loss_aux = h.aux_loss(feats_b)
+                    loss = loss_nll + lam * loss_aux
+                    running_aux[name] += float(loss_aux.item()) * bsz
+                else:
+                    loss = loss_nll
                 opt = optimizers[name]
                 opt.zero_grad(set_to_none=True)
                 loss.backward()
                 opt.step()
-                running[name] += float(loss.item()) * bsz
+                running_nll[name] += float(loss_nll.item()) * bsz
             n += bsz
             if tb is not None and gstep % log_every == 0:
                 for name in heads:
-                    tb.add_scalar(f"train/{name}_nll", running[name] / n, gstep)
+                    tb.add_scalar(f"train/{name}_nll", running_nll[name] / n, gstep)
+                    if float(getattr(heads[name], "aux_lambda", 0.0)) > 0.0:
+                        tb.add_scalar(
+                            f"train/{name}_aux", running_aux[name] / n, gstep
+                        )
             gstep += 1
 
-        val = _evaluate_all(heads, scorer, val_loader, device)
+        val, val_ent = _evaluate_all(heads, scorer, val_loader, device)
+        # Succinct train/val line; entropy only for heads with mixture.
+        train_parts = [f"{k}={running_nll[k]/n:.3f}" for k in heads]
+        val_parts = [f"{k}={v:.3f}" for k, v in val.items()]
+        ent_parts = [
+            f"{k}:H_batch={val_ent[k]['H_batch_norm']:.2f}"
+            for k in heads
+            if val_ent.get(k, {}).get("H_max", 0.0) > 0.0
+        ]
         logger.info(
             f"[ep{epoch}] train: "
-            + " ".join(f"{k}={running[k]/n:.3f}" for k in heads)
+            + " ".join(train_parts)
             + "  ||  val: "
-            + " ".join(f"{k}={v:.3f}" for k, v in val.items())
+            + " ".join(val_parts)
+            + (("  ||  gate(norm): " + " ".join(ent_parts)) if ent_parts else "")
         )
         if tb is not None:
             for name, v in val.items():
                 tb.add_scalar(f"val/{name}_nll", v, epoch)
+            for name, ent in val_ent.items():
+                if ent["H_max"] > 0.0:
+                    tb.add_scalar(f"val/{name}_H_per_norm", ent["H_per_mean_norm"], epoch)
+                    tb.add_scalar(f"val/{name}_H_batch_norm", ent["H_batch_norm"], epoch)
 
     # ---- report ----------------------------------------------------------
-    final = _evaluate_all(heads, scorer, val_loader, device)
+    final, final_ent = _evaluate_all(heads, scorer, val_loader, device)
     ff_native = final["ff_native"]
     ff_r1 = final.get("ff_trained_r1")
     ff_mlp = final.get("ff_mlp")
@@ -384,6 +501,15 @@ def main() -> None:
     summary = {
         "per_block_nll": {k: float(v) for k, v in final.items()},
         "param_counts": param_counts,
+        "aux_lambdas_by_head": {
+            name: float(getattr(h, "aux_lambda", 0.0))
+            for name, h in heads.items()
+        },
+        "gate_entropy": {
+            name: {k: v for k, v in ent.items() if k != "mean_pi"}
+            for name, ent in final_ent.items()
+        },
+        "mean_pi": {name: ent["mean_pi"] for name, ent in final_ent.items()},
         "improvement_pct": {
             "vs_ff_native": improvements_vs_native,
             "vs_ff_trained_r1": improvements_vs_ff_r1,
@@ -410,6 +536,17 @@ def main() -> None:
                     if improvements_vs_ff_gain_mlp
                     else None
                 ),
+                "gate_H_batch_norm": final_ent.get(best_cp_name, {}).get(
+                    "H_batch_norm"
+                ),
+                "gate_H_per_norm": final_ent.get(best_cp_name, {}).get(
+                    "H_per_mean_norm"
+                ),
+                "gate_aux_lambda": float(
+                    getattr(heads[best_cp_name], "aux_lambda", 0.0)
+                )
+                if best_cp_name
+                else None,
             }
             if best_cp_name
             else None
@@ -422,6 +559,7 @@ def main() -> None:
         "n_train_blocks": n_train,
         "n_val_blocks": n_val,
         "ranks": _resolve_ranks(cfg["training"]),
+        "aux_lambdas": _resolve_aux_lambdas(cfg["training"]),
         "block_size": fc.block_size,
     }
     dump_json(run_dir / "summary.json", summary)
@@ -460,6 +598,18 @@ def main() -> None:
         print(
             f"          ff_gain_mlp  vs ff_native:     "
             f"{improvements_vs_native['ff_gain_mlp']:+.2f}%  (gain+MLP control)"
+        )
+    # Gate-collapse diagnostic for best CP.
+    if best_cp_name and final_ent.get(best_cp_name, {}).get("H_max", 0.0) > 0.0:
+        ent = final_ent[best_cp_name]
+        collapse_msg = (
+            "COLLAPSED" if ent["H_batch_norm"] < 0.3 else
+            ("partial" if ent["H_batch_norm"] < 0.7 else "healthy")
+        )
+        print(
+            f"          {best_cp_name} gate: "
+            f"H_batch_norm={ent['H_batch_norm']:.3f}  "
+            f"H_per_norm={ent['H_per_mean_norm']:.3f}  ({collapse_msg})"
         )
     print(f"Outputs: {run_dir}")
     print("=" * 68)

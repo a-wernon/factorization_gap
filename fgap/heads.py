@@ -10,6 +10,8 @@ with the frozen target LM head.
 
 from __future__ import annotations
 
+import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -53,11 +55,13 @@ class SharedTrunkCPHead(nn.Module):
         num_future: int,
         rank: int,
         lm_head_weight: torch.Tensor,   # (V, H) frozen
+        aux_lambda: float = 0.0,
     ) -> None:
         super().__init__()
         self.hidden_size = hidden_size
         self.num_future = num_future
         self.rank = rank
+        self.aux_lambda = float(aux_lambda)
         self.register_buffer("lm_head_weight", lm_head_weight.detach(), persistent=False)
         # init w_sh near 1 so early training matches the FF baseline path
         w = torch.ones(num_future, rank, hidden_size)
@@ -96,14 +100,79 @@ class SharedTrunkCPHead(nn.Module):
         log_joint = torch.logsumexp(log_prior + log_prod, dim=-1)  # (B,)
         return -log_joint
 
+    def aux_loss(self, h: torch.Tensor) -> torch.Tensor:
+        """Load-balancing penalty on the batch-averaged mixture gate.
+
+        Returns (max_H - H(mean_pi)) / max_H ∈ [0, 1]:
+            0 when the batch-averaged gate is uniform across components,
+            1 when fully collapsed to a single component.
+
+        Encourages the optimizer to keep *all* components alive — otherwise
+        an NLL-only training run typically collapses to whichever single
+        rank wins the first few steps, and rank > 1 buys nothing.
+        Rank-1 heads always return 0 (no mixture to balance).
+        """
+        if self.rank <= 1:
+            return h.new_zeros(())
+        log_pi = self.forward(h).float()                       # (B, r)
+        B = h.size(0)
+        log_mean_pi = torch.logsumexp(log_pi, dim=0) - math.log(B)   # (r,)
+        mean_pi = log_mean_pi.exp()
+        H_mean = -(mean_pi * log_mean_pi).sum()
+        max_H = math.log(self.rank)
+        return (max_H - H_mean) / max_H
+
+    @torch.no_grad()
+    def gate_stats(self, h: torch.Tensor) -> dict:
+        """Diagnostics: gate-entropy statistics and mean-pi distribution.
+
+        Returns:
+            H_per_mean  — mean (over batch) of per-sample gate entropy.
+            H_batch     — entropy of the batch-averaged gate distribution.
+            H_max       — log(rank); the entropy of a uniform distribution.
+            mean_pi     — list[r]; batch-averaged mixture weights.
+
+        H_per small → each sample picks one component (peaky per-sample gate).
+        H_batch small (with H_per also small) → the SAME component wins every
+        sample, i.e. the mixture has collapsed. H_per small but H_batch large
+        means per-sample specialization with overall balanced usage — healthy.
+        """
+        if self.rank <= 1:
+            return {
+                "H_per_mean": 0.0,
+                "H_batch": 0.0,
+                "H_max": 0.0,
+                "mean_pi": [1.0] * self.rank,
+            }
+        log_pi = self.forward(h).float()                       # (B, r)
+        pi = log_pi.exp()
+        H_per_mean = float(-(pi * log_pi).sum(dim=-1).mean().item())
+        mean_pi = pi.mean(dim=0)                               # (r,)
+        H_batch = float(
+            -(mean_pi * mean_pi.clamp_min(1e-40).log()).sum().item()
+        )
+        return {
+            "H_per_mean": H_per_mean,
+            "H_batch": H_batch,
+            "H_max": math.log(self.rank),
+            "mean_pi": mean_pi.cpu().tolist(),
+        }
+
 
 class FFTrainedHead(SharedTrunkCPHead):
     """A rank-1 shared-trunk head — learnable per-position scaling of features
     before the LM trunk, with a trivial single-component mixture. Serves as
     the "FF + some extra params trained on the same data" sanity baseline."""
 
-    def __init__(self, hidden_size: int, num_future: int, lm_head_weight: torch.Tensor) -> None:
-        super().__init__(hidden_size, num_future, rank=1, lm_head_weight=lm_head_weight)
+    def __init__(
+        self,
+        hidden_size: int,
+        num_future: int,
+        lm_head_weight: torch.Tensor,
+    ) -> None:
+        super().__init__(
+            hidden_size, num_future, rank=1, lm_head_weight=lm_head_weight
+        )
 
 
 class FFMLPHead(nn.Module):
@@ -148,6 +217,16 @@ class FFMLPHead(nn.Module):
         log_p = _safe_log_softmax_over_vocab(logits)               # (B, n, V)
         log_p_tgt = log_p.gather(2, targets.unsqueeze(-1)).squeeze(-1)  # (B, n)
         return -log_p_tgt.sum(dim=1)                               # (B,)
+
+    # No gate / no mixture → aux and gate_stats are no-ops. Kept so the
+    # training loop can call them uniformly across head types.
+    aux_lambda = 0.0
+
+    def aux_loss(self, h: torch.Tensor) -> torch.Tensor:
+        return h.new_zeros(())
+
+    def gate_stats(self, h: torch.Tensor) -> dict:
+        return {"H_per_mean": 0.0, "H_batch": 0.0, "H_max": 0.0, "mean_pi": []}
 
 
 class FFGainMLPHead(nn.Module):
@@ -202,3 +281,12 @@ class FFGainMLPHead(nn.Module):
         log_p = _safe_log_softmax_over_vocab(logits)
         log_p_tgt = log_p.gather(2, targets.unsqueeze(-1)).squeeze(-1)
         return -log_p_tgt.sum(dim=1)
+
+    # No gate / no mixture → aux and gate_stats are no-ops.
+    aux_lambda = 0.0
+
+    def aux_loss(self, h: torch.Tensor) -> torch.Tensor:
+        return h.new_zeros(())
+
+    def gate_stats(self, h: torch.Tensor) -> dict:
+        return {"H_per_mean": 0.0, "H_batch": 0.0, "H_max": 0.0, "mean_pi": []}
