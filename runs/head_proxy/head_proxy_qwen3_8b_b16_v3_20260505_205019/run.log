@@ -1,0 +1,90 @@
+2026-05-05 20:50:19.881 | INFO     | fgap.utils:configure_logger:44 - Logging to runs/head_proxy/head_proxy_qwen3_8b_b16_v3_20260505_205019/run.log
+2026-05-05 20:50:20.375 | INFO     | __main__:main:232 - Loaded features: N=5276 n=16 H=4096
+2026-05-05 20:50:20.476 | INFO     | __main__:main:258 - train blocks=4221 val blocks=1055
+2026-05-05 20:50:20.476 | INFO     | __main__:_load_lm_head_weight:108 - Loading target lm_head weight from Qwen/Qwen3-8B
+2026-05-05 20:50:26.838 | INFO     | __main__:main:279 - Heads + param counts (excl. frozen lm_head):
+2026-05-05 20:50:26.838 | INFO     | __main__:main:281 -   ff_trained_r1      params=69,633
+2026-05-05 20:50:26.838 | INFO     | __main__:main:281 -   ff_mlp             params=1,052,800
+2026-05-05 20:50:26.838 | INFO     | __main__:main:281 -   ff_gain_mlp        params=1,118,336
+2026-05-05 20:50:26.838 | INFO     | __main__:main:281 -   cp_r8              params=557,064
+2026-05-05 20:50:26.838 | INFO     | __main__:main:281 -   cp_r16             params=1,114,128
+2026-05-05 20:50:26.838 | INFO     | __main__:main:281 -   cp_r32             params=2,228,256
+2026-05-05 20:50:30.419 | INFO     | __main__:main:285 - [pre] val per-block NLL: ff_native=50.2161  ff_trained_r1=50.2137  ff_mlp=50.2161  ff_gain_mlp=50.2737  cp_r8=50.1975  cp_r16=50.2026  cp_r32=50.2058
+2026-05-05 20:50:57.129 | INFO     | __main__:main:316 - [ep0] train: ff_trained_r1=48.318 ff_mlp=44.774 ff_gain_mlp=44.488 cp_r8=47.862 cp_r16=48.189 cp_r32=48.189  ||  val: ff_native=50.216 ff_trained_r1=45.502 ff_mlp=42.331 ff_gain_mlp=41.961 cp_r8=44.750 cp_r16=45.355 cp_r32=45.334
+2026-05-05 20:51:23.842 | INFO     | __main__:main:316 - [ep1] train: ff_trained_r1=45.369 ff_mlp=42.413 ff_gain_mlp=41.824 cp_r8=44.589 cp_r16=45.235 cp_r32=45.266  ||  val: ff_native=50.216 ff_trained_r1=43.986 ff_mlp=41.882 ff_gain_mlp=41.955 cp_r8=43.362 cp_r16=43.912 cp_r32=43.912
+2026-05-05 20:51:50.541 | INFO     | __main__:main:316 - [ep2] train: ff_trained_r1=44.276 ff_mlp=41.102 ff_gain_mlp=40.194 cp_r8=43.434 cp_r16=44.111 cp_r32=44.212  ||  val: ff_native=50.216 ff_trained_r1=43.407 ff_mlp=41.495 ff_gain_mlp=41.257 cp_r8=42.828 cp_r16=43.376 cp_r32=43.363
+2026-05-05 20:52:17.237 | INFO     | __main__:main:316 - [ep3] train: ff_trained_r1=43.664 ff_mlp=39.948 ff_gain_mlp=38.736 cp_r8=42.705 cp_r16=43.424 cp_r32=43.614  ||  val: ff_native=50.216 ff_trained_r1=43.086 ff_mlp=41.532 ff_gain_mlp=41.391 cp_r8=42.492 cp_r16=43.059 cp_r32=43.051
+2026-05-05 20:52:44.277 | INFO     | __main__:main:316 - [ep4] train: ff_trained_r1=43.185 ff_mlp=38.865 ff_gain_mlp=37.379 cp_r8=42.094 cp_r16=42.858 cp_r32=43.140  ||  val: ff_native=50.216 ff_trained_r1=42.843 ff_mlp=42.271 ff_gain_mlp=41.881 cp_r8=42.253 cp_r16=42.841 cp_r32=42.824
+2026-05-05 20:53:10.884 | INFO     | __main__:main:316 - [ep5] train: ff_trained_r1=42.777 ff_mlp=38.250 ff_gain_mlp=36.356 cp_r8=41.558 cp_r16=42.360 cp_r32=42.737  ||  val: ff_native=50.216 ff_trained_r1=42.680 ff_mlp=41.903 ff_gain_mlp=41.644 cp_r8=42.080 cp_r16=42.672 cp_r32=42.662
+2026-05-05 20:53:37.564 | INFO     | __main__:main:316 - [ep6] train: ff_trained_r1=42.409 ff_mlp=37.280 ff_gain_mlp=35.248 cp_r8=41.077 cp_r16=41.900 cp_r32=42.369  ||  val: ff_native=50.216 ff_trained_r1=42.533 ff_mlp=41.970 ff_gain_mlp=41.945 cp_r8=41.909 cp_r16=42.544 cp_r32=42.510
+2026-05-05 20:54:04.270 | INFO     | __main__:main:316 - [ep7] train: ff_trained_r1=42.080 ff_mlp=36.532 ff_gain_mlp=34.242 cp_r8=40.633 cp_r16=41.484 cp_r32=42.041  ||  val: ff_native=50.216 ff_trained_r1=42.402 ff_mlp=42.995 ff_gain_mlp=42.641 cp_r8=41.774 cp_r16=42.416 cp_r32=42.388
+2026-05-05 20:54:31.008 | INFO     | __main__:main:316 - [ep8] train: ff_trained_r1=41.766 ff_mlp=35.722 ff_gain_mlp=33.235 cp_r8=40.219 cp_r16=41.083 cp_r32=41.730  ||  val: ff_native=50.216 ff_trained_r1=42.285 ff_mlp=43.120 ff_gain_mlp=43.171 cp_r8=41.639 cp_r16=42.303 cp_r32=42.270
+2026-05-05 20:54:57.622 | INFO     | __main__:main:316 - [ep9] train: ff_trained_r1=41.481 ff_mlp=34.919 ff_gain_mlp=32.414 cp_r8=39.826 cp_r16=40.726 cp_r32=41.449  ||  val: ff_native=50.216 ff_trained_r1=42.205 ff_mlp=43.514 ff_gain_mlp=43.642 cp_r8=41.571 cp_r16=42.224 cp_r32=42.191
+2026-05-05 20:55:00.524 | INFO     | __main__:main:428 - {
+  "per_block_nll": {
+    "ff_native": 50.216089561426244,
+    "ff_trained_r1": 42.20501795764218,
+    "ff_mlp": 43.514301549540875,
+    "ff_gain_mlp": 43.642041594157284,
+    "cp_r8": 41.57078064832642,
+    "cp_r16": 42.22413370575385,
+    "cp_r32": 42.19053255054058
+  },
+  "param_counts": {
+    "ff_trained_r1": 69633,
+    "ff_mlp": 1052800,
+    "ff_gain_mlp": 1118336,
+    "cp_r8": 557064,
+    "cp_r16": 1114128,
+    "cp_r32": 2228256
+  },
+  "improvement_pct": {
+    "vs_ff_native": {
+      "ff_trained_r1": 15.953196821478139,
+      "ff_mlp": 13.345897839550979,
+      "ff_gain_mlp": 13.091517130634662,
+      "cp_r8": 17.21621294809217,
+      "cp_r16": 15.915129842789385,
+      "cp_r32": 15.982042968655483
+    },
+    "vs_ff_trained_r1": {
+      "ff_mlp": -3.1021988741071542,
+      "ff_gain_mlp": -3.4048644119932225,
+      "cp_r8": 1.5027533217786833,
+      "cp_r16": -0.04529259561234692,
+      "cp_r32": 0.034321528108656366
+    },
+    "vs_ff_mlp": {
+      "ff_gain_mlp": -0.29355876129823166,
+      "cp_r8": 4.466395718202587,
+      "cp_r16": 2.964928305968954,
+      "cp_r32": 3.0421469536703634
+    },
+    "vs_ff_gain_mlp": {
+      "cp_r8": 4.746022115766833,
+      "cp_r16": 3.2489494913850705,
+      "cp_r32": 3.325942120478223
+    }
+  },
+  "best_cp": {
+    "name": "cp_r8",
+    "nll": 41.57078064832642,
+    "pct_vs_native": 17.21621294809217,
+    "pct_vs_ff_trained_r1": 1.5027533217786833,
+    "pct_vs_ff_mlp": 4.466395718202587,
+    "pct_vs_ff_gain_mlp": 4.746022115766833
+  },
+  "kill_criterion": {
+    "min_improvement_pct": 2.0,
+    "observed_best_pct_vs_native": 17.21621294809217,
+    "decision": "GO"
+  },
+  "n_train_blocks": 4221,
+  "n_val_blocks": 1055,
+  "ranks": [
+    8,
+    16,
+    32
+  ],
+  "block_size": 16
+}
