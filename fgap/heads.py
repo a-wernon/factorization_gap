@@ -30,7 +30,7 @@ class FFNativeScorer:
     @torch.inference_mode()
     def nll(self, h: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         """Return per-block NLL (B,) = -sum_i log p(x_i | h) under factorized p."""
-        logits = F.linear(h, self.lm_head_weight)   # (B, n, V)
+        logits = F.linear(h.to(self.lm_head_weight.dtype), self.lm_head_weight)   # (B, n, V)
         log_p = _safe_log_softmax_over_vocab(logits)
         log_p_tgt = log_p.gather(2, targets.unsqueeze(-1)).squeeze(-1)  # (B, n)
         return -log_p_tgt.sum(dim=1)  # (B,)
@@ -76,7 +76,7 @@ class SharedTrunkCPHead(nn.Module):
         # logits over vocab via shared trunk
         # reshape to (B*n*r, H) for a single linear
         flat = h_expanded.reshape(B * n * r, H)
-        logits = F.linear(flat, self.lm_head_weight)          # (B*n*r, V)
+        logits = F.linear(flat.to(self.lm_head_weight.dtype), self.lm_head_weight)  # (B*n*r, V)
         log_p = _safe_log_softmax_over_vocab(logits)          # (B*n*r, V)
         # gather target
         tgt = targets.unsqueeze(-1).expand(B, n, r).reshape(B * n * r, 1)

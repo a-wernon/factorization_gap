@@ -123,7 +123,7 @@ def drafter_block_logits(
     # full (0..ctx+n) range, but only feed `n` noise embeddings.  So we give
     # positions only for the block portion: ctx..ctx+n.
     pos = torch.arange(
-        context_len, context_len + n, device=block_ids.device
+        0, context_len + n, device=block_ids.device
     ).unsqueeze(0)
 
     drafter_hidden = m.drafter(

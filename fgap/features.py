@@ -80,7 +80,7 @@ def build_feature_cache(
         target_hidden, _ = target_context_features(m, ctx)
         noise_embedding = m.target.get_input_embeddings()(x_t)
         pos = torch.arange(
-            ctx.size(1), ctx.size(1) + m.block_size, device=m.device
+            0, ctx.size(1) + m.block_size, device=m.device
         ).unsqueeze(0)
         drafter_hidden = m.drafter(
             target_hidden=target_hidden,

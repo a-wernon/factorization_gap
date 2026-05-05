@@ -59,7 +59,7 @@ def _drafter_logits(
         )
     noise_embedding = m.target.get_input_embeddings()(block_ids)
     pos = torch.arange(
-        context_len, context_len + n, device=block_ids.device
+        0, context_len + n, device=block_ids.device
     ).unsqueeze(0).expand(B, -1)
     drafter_hidden = m.drafter(
         target_hidden=target_hidden,
