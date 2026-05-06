@@ -1,0 +1,55 @@
+{
+  "run_name": "head_proxy_qwen3_8b_b16_v4_overnight",
+  "models": {
+    "target": "Qwen/Qwen3-8B",
+    "drafter": "z-lab/Qwen3-8B-DFlash-b16",
+    "dtype": "bfloat16",
+    "device": "cuda",
+    "enable_thinking": false
+  },
+  "data": {
+    "datasets": [
+      "gsm8k",
+      "math500",
+      "humaneval",
+      "mbpp"
+    ],
+    "num_prompts": 3000,
+    "blocks_per_prompt": 32,
+    "gen_max_new_tokens": 512,
+    "block_size": 16,
+    "seed": 42
+  },
+  "features": {
+    "cache_dir": "cache/features",
+    "cache_name": "mix4ds_gen512_b16"
+  },
+  "training": {
+    "ranks": [
+      8,
+      16,
+      32
+    ],
+    "aux_lambdas": [
+      0.0,
+      0.1
+    ],
+    "include_ff_r1": true,
+    "include_ff_mlp": true,
+    "include_ff_gain_mlp": true,
+    "mlp_hidden": 128,
+    "epochs": 30,
+    "batch_size": 32,
+    "lr": 0.001,
+    "weight_decay": 0.0,
+    "val_frac": 0.1,
+    "log_every": 100
+  },
+  "output": {
+    "root": "runs/head_proxy",
+    "tb": true
+  },
+  "kill_criterion": {
+    "min_improvement_pct": 2.0
+  }
+}
